@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-func TestGetter(t *testing.T) {
-	var f Getter = GetterFunc(func(key string) ([]byte, error) {
+func TestLocalGetter(t *testing.T) {
+	var f LocalGetter = GetterFunc(func(key string) ([]byte, error) {
 		return []byte(key), nil
 	})
 
 	expect := []byte("key")
 	if value, err := f.Get("key"); err != nil || !reflect.DeepEqual(value, expect) {
-		t.Errorf("Getter callback failed")
+		t.Errorf("LocalGetter callback failed")
 	}
 }
 
