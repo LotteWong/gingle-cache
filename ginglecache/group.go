@@ -2,6 +2,7 @@ package ginglecache
 
 import (
 	"fmt"
+	"ginglecache/singleflight"
 	"log"
 	"sync"
 )
@@ -20,6 +21,7 @@ type Group struct {
 	name      string
 	getter    LocalGetter
 	picker    PeerPicker
+	loader    *singleflight.Calls
 	mainCache cache
 }
 
@@ -39,6 +41,7 @@ func NewGroup(name string, cap int64, getter LocalGetter) *Group {
 	group := &Group{
 		name:      name,
 		getter:    getter,
+		loader:    &singleflight.Calls{},
 		mainCache: cache{cap: cap},
 	}
 	groups[name] = group
@@ -69,19 +72,26 @@ func (g *Group) Get(key string) (ByteView, error) {
 }
 
 func (g *Group) load(key string) (ByteView, error) {
-	// TODO: 优先从其它缓存要
-	if g.picker != nil {
-		if peer, ok := g.picker.PickPeer(key); ok {
-			value, err := g.getRemotely(peer, key)
-			if err == nil {
-				return value, nil
+	view, err := g.loader.Do(key, func() (interface{}, error) {
+		// TODO: 优先从其它缓存要
+		if g.picker != nil {
+			if peer, ok := g.picker.PickPeer(key); ok {
+				value, err := g.getRemotely(peer, key)
+				if err == nil {
+					return value, nil
+				}
+				log.Println("[GingleCache] failed to get from peer:", err)
 			}
-			log.Println("[GingleCache] failed to get from peer:", err)
 		}
-	}
 
-	// TODO: 在没有缓存或缓存失败的情况之下，从本地来读取
-	return g.getLocally(key)
+		// TODO: 在没有缓存或缓存失败的情况之下，从本地来读取
+		return g.getLocally(key)
+	})
+
+	if err != nil {
+		return ByteView{}, err
+	}
+	return view.(ByteView), nil
 }
 
 func (g *Group) RegisterPicker(picker PeerPicker) {
