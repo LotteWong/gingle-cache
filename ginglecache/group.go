@@ -7,34 +7,30 @@ import (
 	"sync"
 )
 
-type LocalGetter interface {
-	Get(key string) ([]byte, error)
-}
-
-type GetterFunc func(key string) ([]byte, error)
-
-func (f GetterFunc) Get(key string) ([]byte, error) {
-	return f(key)
-}
-
+// Group includes cache, getters, loader and identity
 type Group struct {
-	name      string
-	getter    LocalGetter
-	picker    PeerPicker
-	loader    *singleflight.Calls
-	mainCache cache
+	name string // cache content classification id
+
+	getter LocalGetter         // helper to get data from local
+	picker RemotePicker        // helper to get data from remote
+	loader *singleflight.Calls // no-breakdown strategy
+
+	mainCache cache // thread-safe cache
 }
 
 var (
-	mux    sync.RWMutex              // TODO: 全局读写锁
-	groups = make(map[string]*Group) // TODO: 全局命名空间表
+	mux    sync.RWMutex              // global read-write lock
+	groups = make(map[string]*Group) // global namespace map
 )
 
+// NewGroup returns a new instance of Group
 func NewGroup(name string, cap int64, getter LocalGetter) *Group {
+	// getter cannot be nil, picker can be nil
 	if getter == nil {
 		panic("Group cannot have nil getter")
 	}
 
+	// Write operation, use write lock
 	mux.Lock()
 	defer mux.Unlock()
 
@@ -44,11 +40,14 @@ func NewGroup(name string, cap int64, getter LocalGetter) *Group {
 		loader:    &singleflight.Calls{},
 		mainCache: cache{cap: cap},
 	}
+
 	groups[name] = group
 	return group
 }
 
+// GetGroup returns a existed instance of Group
 func GetGroup(name string) *Group {
+	// Read Operation, use read lock
 	mux.RLock()
 	defer mux.RUnlock()
 
@@ -56,26 +55,29 @@ func GetGroup(name string) *Group {
 	return group
 }
 
+// Get defines how cache get a element with getters and singleflight
 func (g *Group) Get(key string) (ByteView, error) {
 	if key == "" {
 		return ByteView{}, fmt.Errorf("key is required")
 	}
 
-	// TODO: 命中，从缓存中取出数据
+	// If cache hit, return
 	if value, ok := g.mainCache.get(key); ok {
 		log.Println("[GingleCache] hit ")
 		return value, nil
 	}
 
-	// TODO: 错失，使用策略取出数据
+	// If cache missed, load
 	return g.load(key)
 }
 
+// load defines how to get data from local or remote
 func (g *Group) load(key string) (ByteView, error) {
+	// Apply singleflight strategy to avoid cache breakdown
 	view, err := g.loader.Do(key, func() (interface{}, error) {
-		// TODO: 优先从其它缓存要
 		if g.picker != nil {
 			if peer, ok := g.picker.PickPeer(key); ok {
+				// First try to get data from remote
 				value, err := g.getRemotely(peer, key)
 				if err == nil {
 					return value, nil
@@ -84,7 +86,7 @@ func (g *Group) load(key string) (ByteView, error) {
 			}
 		}
 
-		// TODO: 在没有缓存或缓存失败的情况之下，从本地来读取
+		// Second try to get data from local
 		return g.getLocally(key)
 	})
 
@@ -94,43 +96,50 @@ func (g *Group) load(key string) (ByteView, error) {
 	return view.(ByteView), nil
 }
 
-func (g *Group) RegisterPicker(picker PeerPicker) {
+// getLocally defines how to get data from local
+func (g *Group) getLocally(key string) (ByteView, error) {
+	bytes, err := g.getter.Get(key)
+
+	if err != nil {
+		return ByteView{}, err
+	}
+
+	value := ByteView{
+		bytes: cloneByteView(bytes),
+	}
+
+	// Write back local data to main cache
+	g.populateCache(key, value)
+
+	return value, nil
+}
+
+// getRemotely defines how to get data from remote
+func (g *Group) getRemotely(getter RemoteGetter, key string) (ByteView, error) {
+	bytes, err := getter.Get(g.name, key)
+
+	if err != nil {
+		return ByteView{}, err
+	}
+
+	value := ByteView{
+		bytes: cloneByteView(bytes),
+	}
+
+	return value, nil
+}
+
+// populateCache helps write back local data to main cache
+func (g *Group) populateCache(key string, value ByteView) {
+	g.mainCache.set(key, value)
+}
+
+// RegisterPicker assigns picker to group
+func (g *Group) RegisterPicker(picker RemotePicker) {
+	// picker can only be initialized once
 	if g.picker != nil {
 		panic("RegisterPeers called more than once")
 	}
+
 	g.picker = picker
-}
-
-func (g *Group) getLocally(key string) (ByteView, error) {
-	bytes, err := g.getter.Get(key)
-	if err != nil {
-		return ByteView{}, err
-	}
-
-	value := ByteView{
-		bytes: cloneByteView(bytes),
-	}
-
-	g.populate(key, value) // TODO: 将数据写回缓存中
-
-	return value, nil
-}
-
-func (g *Group) getRemotely(peer PeerGetter, key string) (ByteView, error) {
-	bytes, err := peer.Get(g.name, key)
-	if err != nil {
-		return ByteView{}, err
-	}
-
-	value := ByteView{
-		bytes: cloneByteView(bytes),
-	}
-
-	// TODO: 数据不需要写到本地缓存
-
-	return value, nil
-}
-
-func (g *Group) populate(key string, value ByteView) {
-	g.mainCache.set(key, value)
 }

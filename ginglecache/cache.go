@@ -5,15 +5,14 @@ import (
 	"sync"
 )
 
-// TODO: 封装更底层的lru
-// TODO: Value更加具体，是只读的ByteView保证并发性
-
+// cache is equipped with mutex to guarantee thread safty
 type cache struct {
-	mux sync.Mutex // TODO: 读写锁的升级
+	mux sync.Mutex
 	lru *lru.Cache
 	cap int64
 }
 
+// get defines how cache thread-safely get a element
 func (c *cache) get(key string) (value ByteView, ok bool) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
@@ -29,12 +28,14 @@ func (c *cache) get(key string) (value ByteView, ok bool) {
 	return
 }
 
+// set defines how cache thread-safely set a element
 func (c *cache) set(key string, value ByteView) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
+	// Delay initailization
 	if c.lru == nil {
-		c.lru = lru.New(c.cap, nil) // TODO: 初始化封装性不统一
+		c.lru = lru.New(c.cap, nil)
 	}
 
 	c.lru.Set(key, value)

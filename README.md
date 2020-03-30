@@ -53,7 +53,9 @@ func startCacheClient(addr string, group *ginglecache.Group) {
 
 ## TODOs
 
-- [ ] Comments
-- [ ] Blogs
 - [ ] HTTP2 Support
 - [ ] Protobuf Support
+- [ ] More Replacement Strategy
+- [ ] Distributed Unique ID Generation
+- [ ] Distributed Lock Manager
+- [ ] Goroutine and Connect Pool

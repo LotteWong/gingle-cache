@@ -28,8 +28,9 @@ func startCacheServer(addr string, addrs []string, group *ginglecache.Group) {
 	picker := ginglecache.NewHTTPPool(addr)
 	picker.ConfPeers(addrs...)
 	group.RegisterPicker(picker)
+
 	log.Println("ginglecache server is running at", addr)
-	log.Fatal(http.ListenAndServe(addr[7:], picker)) // TODO: 7是http://的长度
+	log.Fatal(http.ListenAndServe(addr[7:], picker))
 }
 
 func startCacheClient(addr string, group *ginglecache.Group) {
@@ -44,8 +45,9 @@ func startCacheClient(addr string, group *ginglecache.Group) {
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		rw.Write(view.Bytes())
 	}))
+
 	log.Println("ginglecache client is running at", addr)
-	log.Fatal(http.ListenAndServe(addr[7:], nil)) // TODO: 7是http://的长度
+	log.Fatal(http.ListenAndServe(addr[7:], nil))
 }
 
 func main() {
@@ -70,7 +72,7 @@ func main() {
 
 	group := createGroup()
 	if client {
-		go startCacheClient(clientAddr, group) // TODO: 重复启动的客户端
+		go startCacheClient(clientAddr, group)
 	}
-	startCacheServer(serverAddrs[server], []string(addrs), group) // TODO: 注意可以包含自己
+	startCacheServer(serverAddrs[server], []string(addrs), group)
 }
